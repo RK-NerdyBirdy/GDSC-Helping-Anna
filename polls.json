@@ -1,0 +1,44 @@
+{
+  "1741068636": {
+    "id": "1741068636",
+    "message_id": "1346364176473526272",
+    "channel_id": 1346187523663335476,
+    "author_id": 701290652323020881,
+    "question": "Murgi pehle aayi ya anda??",
+    "options": [
+      {
+        "text": "murgi",
+        "emoji": "1\ufe0f\u20e3",
+        "votes": []
+      },
+      {
+        "text": "anda",
+        "emoji": "2\ufe0f\u20e3",
+        "votes": []
+      }
+    ],
+    "end_time": "2025-03-05T11:40:33.905261"
+  },
+  "1741068965": {
+    "id": "1741068965",
+    "message_id": "1346365557011910697",
+    "channel_id": 1346187523663335476,
+    "author_id": 701290652323020881,
+    "question": "Murgi pehle aayi ya anda??",
+    "options": [
+      {
+        "text": "murgi",
+        "emoji": "1\ufe0f\u20e3",
+        "votes": [
+          701290652323020881
+        ]
+      },
+      {
+        "text": "anda",
+        "emoji": "2\ufe0f\u20e3",
+        "votes": []
+      }
+    ],
+    "end_time": "2025-03-05T11:46:03.268592"
+  }
+}

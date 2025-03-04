@@ -21,6 +21,9 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 ggclient = genai.Client(api_key=os.getenv("GEMNI"))
 
 Reminders_file = "reminders.json"
+Polls_file = "polls.json"
+polls ={}
+
 reminders =[]
 def parse_time(time_str: str) -> Optional[datetime.datetime]:
     """Parse time string into datetime object."""
@@ -54,15 +57,24 @@ def save_reminders():
     """Save reminders to file."""
     with open(Reminders_file, 'w') as f:
         json.dump(reminders, f, indent=2)
-    
+def save_polls():
+    """Save polls to file."""
+    with open(Polls_file, 'w') as f:
+        json.dump(polls, f, indent=2)   
 def load_data():
-    global reminders
+    global reminders,polls
     if os.path.exists(Reminders_file):
         with open(Reminders_file, 'r') as f:
             reminders = json.load(f)
     else:
         reminders=[]
         save_reminders()
+    if os.path.exists(Polls_file):
+        with open(Polls_file, 'r') as f:
+            polls = json.load(f)
+    else:
+        polls = {}
+        save_polls()
 
 # Tasks
 @tasks.loop(seconds=60)
@@ -94,6 +106,43 @@ async def check_reminders():
         except Exception as e:
             print(f"Error sending reminder: {e}")  
 
+@tasks.loop(seconds=60)
+async def check_polls():
+    
+    now = datetime.datetime.now().isoformat()
+    expired_poll_ids = []
+    
+    for poll_id, poll in polls.items():
+        if poll['end_time'] <= now:
+            expired_poll_ids.append(poll_id)
+            try:
+                channel = bot.get_channel(poll['channel_id'])
+                if channel:
+                    # Tally results
+                    results = []
+                    for option in poll['options']:
+                        results.append({
+                            'text': option['text'],
+                            'votes': len(option['votes'])
+                        })
+                    
+                    results.sort(key=lambda x: x['votes'], reverse=True)
+                    
+                    result_message = f"**Poll Results: {poll['question']}**\n\n"
+                    for i, result in enumerate(results):
+                        result_message += f"{i+1}. {result['text']}: {result['votes']} votes\n"
+                    
+                    await channel.send(result_message)
+            except Exception as e:
+                print(f"Error ending poll: {e}")
+    
+    # Remove expired polls
+    for poll_id in expired_poll_ids:
+        polls.pop(poll_id, None)
+    
+    if expired_poll_ids:
+        save_polls()
+
 
 
 
@@ -107,6 +156,10 @@ async def on_ready():
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+    # Start background tasks
+    check_reminders.start()
+    check_polls.start()
+    
 
 @bot.event
 async def on_message(message):
@@ -142,7 +195,59 @@ async def on_message(message):
             except Exception as e:
                 print(f"Error generating response: {e}")
                 await message.reply("Sorry, I encountered an error processing your request maa. Please try again later.")
+
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    """Called when a reaction is added to a message."""
+    if user.bot:
+        return
     
+    # Check if this is a poll
+    message_id = str(reaction.message.id)
+    for poll_id, poll in polls.items():
+        if poll['message_id'] == message_id:
+            emoji = str(reaction.emoji)
+            
+            # Find the option with this emoji
+            for option in poll['options']:
+                if option['emoji'] == emoji:
+                    # Remove other votes from this user
+                    for opt in poll['options']:
+                        if user.id in opt['votes']:
+                            opt['votes'].remove(user.id)
+                    
+                    # Add user's vote
+                    if user.id not in option['votes']:
+                        option['votes'].append(user.id)
+                    print(f"vote added to the poll {message_id} by {user.id}")
+                    save_polls()
+                    break
+            
+            break
+
+@bot.event
+async def on_reaction_remove(reaction, user):
+    """Called when a reaction is removed from a message."""
+    if user.bot:
+        return
+    
+    # Check if this is a poll
+    message_id = str(reaction.message.id)
+    for poll_id, poll in polls.items():
+        if poll['message_id'] == message_id:
+            emoji = str(reaction.emoji)
+            
+            # Find the option with this emoji
+            for option in poll['options']:
+                if option['emoji'] == emoji and user.id in option['votes']:
+                    option['votes'].remove(user.id)
+                    print(f"vote deleted from the poll {message_id} by {user.id}")
+                    save_polls()
+                    break
+            
+            break
+
 @bot.command(name='summarize')
 async def summarize(ctx, message_id=None):
 
@@ -279,5 +384,82 @@ async def delallreminders(ctx):
     save_reminders()
     
     await ctx.reply(f"All reminders deleted")
+
+@bot.command(name='poll')
+async def create_poll(ctx, *, args=None):
+    """
+    Create a poll.
+    Usage: !poll "Question?" "Option 1" "Option 2" "Option 3" 30m
+    """
+    if not args:
+        await ctx.reply('Please use the format: `!poll "Question?" "Option 1" "Option 2" [more options] [duration]`')
+        return
+    
+    # Parse the poll command
+    try:
+        # Extract all quoted strings
+        matches = re.findall(r'"([^"]+)"', args)
+        
+        if len(matches) < 3:  # Need at least a question and 2 options
+            await ctx.reply('Please provide a question and at least 2 options in quotes.')
+            return
+        
+        question = matches[0]
+        options = matches[1:]
+        
+        if len(options) > 10:
+            await ctx.reply('Polls can have a maximum of 10 options.')
+            return
+        
+        # Check for duration at the end
+        duration_match = re.search(r'\s+(\d+[mhdw])$', args)
+        if duration_match:
+            duration_str = duration_match.group(1)
+            end_time = parse_time(duration_str)
+        else:
+            # Default: 1 day
+            end_time = datetime.datetime.now() + datetime.timedelta(days=1)
+        
+        # Create poll message
+        emoji_list = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+        
+        poll_message = f"**Poll: {question}**\n\n"
+        
+        options_data = []
+        for i, option in enumerate(options):
+            emoji = emoji_list[i]
+            poll_message += f"{emoji} {option}\n"
+            options_data.append({
+                'text': option,
+                'emoji': emoji,
+                'votes': []
+            })
+        
+        poll_message += f"\nPoll ends at: {end_time.strftime('%Y-%m-%d %H:%M')}"
+        
+        # Send poll message
+        sent_message = await ctx.send(poll_message)
+        
+        # Add reactions
+        for i in range(len(options)):
+            await sent_message.add_reaction(emoji_list[i])
+        
+        # Store poll data
+        poll_id = str(int(datetime.datetime.now().timestamp()))
+        polls[poll_id] = {
+            'id': poll_id,
+            'message_id': str(sent_message.id),
+            'channel_id': ctx.channel.id,
+            'author_id': ctx.author.id,
+            'question': question,
+            'options': options_data,
+            'end_time': end_time.isoformat()
+        }
+        
+        save_polls()
+    
+    except Exception as e:
+        print(f"Error creating poll: {e}")
+        await ctx.reply('Error creating poll. Please use the format: `!poll "Question?" "Option 1" "Option 2" [more options] [duration]`')
 
 bot.run(token) 
