@@ -7,8 +7,8 @@ import re
 import json
 import datetime
 from typing import List, Dict, Any, Optional, Union
-import wavelink
-
+import yt_dlp as youtube_dl
+import asyncio
 load_dotenv()
 # Bot configuration
 intents = discord.Intents.default()
@@ -19,6 +19,49 @@ intents.reactions = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 ggclient = genai.Client(api_key=os.getenv("GEMNI"))
+
+youtube_dl.utils.bug_reports_message = lambda: ''
+
+ytdl_format_options = {
+    'format': 'bestaudio/best',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0'  # Bind to IPv4 since IPv6 addresses cause issues sometimes
+}
+
+ffmpeg_options = {
+    'options': '-vn'
+}
+
+ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+
+        if 'entries' in data:
+            data = data['entries'][0]
+
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+
+# Queue system
+queues = {}
 
 Reminders_file = "reminders.json"
 Polls_file = "polls.json"
@@ -166,22 +209,7 @@ async def on_ready():
     # Start background tasks
     check_reminders.start()
     check_polls.start()
-    # Connect to Wavelink node for music
-    try:
-        node = wavelink.Node(uri=os.getenv('LAVALINK_URI', 'http://localhost:2333'), 
-                            password=os.getenv('LAVALINK_PASSWORD', 'youshallnotpass'))
-        await wavelink.Pool.connect(client=bot, nodes=[node])
-        print("Connected to Lavalink node!")
-    except Exception as e:
-        print(f"Failed to connect to Lavalink: {e}")
-        print("Music features may not work. Make sure Lavalink is running.")
     
-    # Sync commands
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
 
 @bot.event
 async def on_member_join(member):
@@ -518,4 +546,100 @@ async def set_welcome(ctx, *, message):
     
     await ctx.reply(f"Welcome message set to: \"{message}\"")
 
+
+
+
+def get_queue(guild_id):
+    if guild_id not in queues:
+        queues[guild_id] = []
+    return queues[guild_id]
+
+async def play_next(ctx):
+    queue = get_queue(ctx.guild.id)
+    if queue:
+        next_track = queue.pop(0)
+        player = await YTDLSource.from_url(next_track, loop=bot.loop, stream=True)
+        ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        await ctx.send(f'Now playing: **{player.title}**')
+    else:
+        await ctx.send("Queue is empty. Add more songs with `!play`.")
+
+@bot.command(name='play', aliases=['p'])
+async def play(ctx, *, query: str = None):
+    """Play a song from YouTube or add it to the queue."""
+    if not query:
+        await ctx.send("Please provide a song name or URL.")
+        return
+
+    if not ctx.author.voice:
+        await ctx.reply("You need to be in a voice channel to play music!")
+        return
+
+    # Ensure the bot is connected
+    if not ctx.voice_client:
+        await ctx.author.voice.channel.connect()
+
+    async with ctx.typing():
+        try:
+            player = await YTDLSource.from_url(query, loop=bot.loop, stream=True)
+            queue = get_queue(ctx.guild.id)
+
+            if ctx.voice_client.is_playing():
+                queue.append(query)
+                await ctx.send(f"Added to queue: **{player.title}**")
+            else:
+                ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+                await ctx.send(f'Now playing: **{player.title}**')
+        except Exception as e:
+            await ctx.send(f"Error: {e}")
+
+@bot.command(name='skip')
+async def skip(ctx):
+    """Skip the current song."""
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()
+        await ctx.send("Skipped the current song.")
+        await play_next(ctx)
+    else:
+        await ctx.send("Nothing is playing right now.")
+
+@bot.command(name='queue', aliases=['q'])
+async def show_queue(ctx):
+    """Show the current music queue."""
+    queue = get_queue(ctx.guild.id)
+    if not queue:
+        await ctx.send("The queue is empty.")
+        return
+
+    queue_message = "**Current Queue:**\n"
+    for i, track in enumerate(queue, 1):
+        queue_message += f"{i}. {track}\n"
+
+    await ctx.send(queue_message)
+
+@bot.command(name='stop')
+async def stop(ctx):
+    """Stop the music and clear the queue."""
+    if ctx.voice_client:
+        ctx.voice_client.stop()
+        queues[ctx.guild.id] = []  # Clear the queue
+        await ctx.send("Stopped the music and cleared the queue.")
+
+@bot.command(name='join')
+async def join(ctx):
+    """Join the voice channel."""
+    if not ctx.author.voice:
+        await ctx.send("You are not connected to a voice channel.")
+        return
+    await ctx.author.voice.channel.connect()
+
+@bot.command(name='leave')
+async def leave(ctx):
+    """Leave the voice channel."""
+    if ctx.voice_client:
+        queues[ctx.guild.id] = []  # Clear the queue
+        await ctx.voice_client.disconnect()
+        await ctx.send("Disconnected from the voice channel.")
+
+    
 bot.run(token) 
