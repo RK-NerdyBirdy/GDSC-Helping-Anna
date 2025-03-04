@@ -7,6 +7,8 @@ import re
 import json
 import datetime
 from typing import List, Dict, Any, Optional, Union
+
+
 load_dotenv()
 # Bot configuration
 intents = discord.Intents.default()
@@ -19,7 +21,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 ggclient = genai.Client(api_key=os.getenv("GEMNI"))
 
 Reminders_file = "reminders.json"
-
+reminders =[]
 def parse_time(time_str: str) -> Optional[datetime.datetime]:
     """Parse time string into datetime object."""
     now = datetime.datetime.now()
@@ -62,7 +64,35 @@ def load_data():
         reminders=[]
         save_reminders()
 
+# Tasks
+@tasks.loop(seconds=60)
+async def check_reminders():
     
+    global reminders
+    now = datetime.datetime.now()
+    due_reminders = []
+    remaining_reminders = []
+    
+    for reminder in reminders:
+        reminder_time = datetime.datetime.fromisoformat(reminder['time'])
+        if reminder_time <= now:
+            due_reminders.append(reminder)
+        else:
+            remaining_reminders.append(reminder)
+    
+    reminders = remaining_reminders
+    save_reminders()
+    
+    for reminder in due_reminders:
+        try:
+            channel = bot.get_channel(reminder['channel_id'])
+            if channel:
+                await channel.send(f"<@{reminder['user_id']}>, here's your reminder: {reminder['content']}")
+            else:
+                user = await bot.fetch_user(reminder['user_id'])
+                await user.send(f"Here's your reminder: {reminder['content']}")
+        except Exception as e:
+            print(f"Error sending reminder: {e}")  
 
 
 
@@ -193,4 +223,61 @@ async def remind(ctx,time_arg, *, content=None):
     save_reminders()
     
     await ctx.reply(f"Reminder set for {reminder_time.strftime('%Y-%m-%d %H:%M')}: {content} . sit back and Relax maa")
-bot.run(token)  
+ 
+
+
+@bot.command(name="reminders")
+async def reminders(ctx):
+    #To list out all the reminders 
+    usr_reminders = [i for i in reminders if i["user_id"] == ctx.author.id] #list comprehension technique
+    usr_reminders.sort(key=lambda x: x["time"])
+
+    if not usr_reminders:
+        await ctx.reply("You have no active reminders maa. use !Remind to create one.")
+        return
+    
+    response = "**Your reminders:**\n\n"
+    
+    for i, reminder in enumerate(usr_reminders):
+        reminder_time = datetime.datetime.fromisoformat(reminder['time'])
+        timestamp = int(reminder_time.timestamp())
+        response += f"{i+1}. <t:{timestamp}:F> - {reminder['content']}\n"
+    
+    await ctx.reply(response)
+
+@bot.command(name="delreminder")
+async def delreminder(ctx,index: int):
+    if index <= 0:
+        await ctx.reply("Please specify a valid reminder number.")
+        return
+    
+    usr_reminders = [r for r in reminders if r['user_id'] == ctx.author.id]
+    usr_reminders.sort(key=lambda x: x['time'])
+    
+    if not usr_reminders or index > len(usr_reminders):
+        await ctx.reply("Invalid reminder number. Use `!reminders` to see your list of reminders.")
+        return
+    
+    reminder_to_delete = usr_reminders[index-1]
+    reminders.remove(reminder_to_delete)
+    save_reminders()
+    
+    await ctx.reply(f"Deleted reminder: {reminder_to_delete['content']}")
+
+@bot.command(name="delallreminders")
+async def delallreminders(ctx):
+    
+    
+    usr_reminders = [r for r in reminders if r['user_id'] == ctx.author.id]
+    usr_reminders.sort(key=lambda x: x['time'])
+    
+    if not usr_reminders:
+        await ctx.reply("Invalid reminders. Use `!reminders` to see your list of reminders.")
+        return
+    for i in usr_reminders:
+        reminders.remove(i)
+    save_reminders()
+    
+    await ctx.reply(f"All reminders deleted")
+
+bot.run(token) 
