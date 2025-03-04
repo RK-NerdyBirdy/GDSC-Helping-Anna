@@ -318,7 +318,10 @@ async def on_reaction_remove(reaction, user):
 
 @bot.command(name='summarize')
 async def summarize(ctx, message_id=None):
-
+    """
+    Summarize a message or provided text.
+    Usage: !summarize <message_id> or reply to a message with !summarize
+    """
     text_to_summarize = None
     
     if message_id:
@@ -358,6 +361,12 @@ async def summarize(ctx, message_id=None):
 
 @bot.command(name="remind")
 async def remind(ctx,time_arg, *, content=None):
+    """
+    Set a reminder.
+    Usage: !remind <time> <message>
+    Time format: 1h, 30m, 1d, 1w, or YYYY-MM-DD HH:MM
+    Example: !remind 1h Do your homework
+    """
     if not content:
         parts = time_arg.split()
         if len(parts)>=2 and re.match(r'^\d{4}-\d{2}-\d{2}$', parts[0]):
@@ -401,7 +410,10 @@ async def remind(ctx,time_arg, *, content=None):
 
 @bot.command(name="reminders")
 async def reminders(ctx):
-    #To list out all the reminders 
+    """
+    List all your active reminders.
+    Usage: !reminders
+    """
     usr_reminders = [i for i in reminders if i["user_id"] == ctx.author.id] #list comprehension technique
     usr_reminders.sort(key=lambda x: x["time"])
 
@@ -420,6 +432,11 @@ async def reminders(ctx):
 
 @bot.command(name="delreminder")
 async def delreminder(ctx,index: int):
+    """
+    Delete a specific reminder by its index.
+    Usage: !delreminder <index>
+    Example: !delreminder 1
+    """
     if index <= 0:
         await ctx.reply("Please specify a valid reminder number.")
         return
@@ -439,7 +456,10 @@ async def delreminder(ctx,index: int):
 
 @bot.command(name="delallreminders")
 async def delallreminders(ctx):
-    
+    """
+    Delete all your reminders.
+    Usage: !delallreminders
+    """
     
     usr_reminders = [r for r in reminders if r['user_id'] == ctx.author.id]
     usr_reminders.sort(key=lambda x: x['time'])
@@ -533,7 +553,11 @@ async def create_poll(ctx, *, args=None):
 @bot.command(name='setwelcome')
 @commands.has_permissions(administrator=True)
 async def set_welcome(ctx, *, message):
-    """Set a custom welcome message for new members."""
+    """
+    Set a custom welcome message for new members.
+    Usage: !setwelcome <message>
+    Example: !setwelcome Welcome to the server, {user}!
+    """
     guild_id = str(ctx.guild.id)
     
     if guild_id not in settings['servers']:
@@ -555,6 +579,7 @@ def get_queue(guild_id):
     return queues[guild_id]
 
 async def play_next(ctx):
+    
     queue = get_queue(ctx.guild.id)
     if queue:
         next_track = queue.pop(0)
@@ -566,7 +591,11 @@ async def play_next(ctx):
 
 @bot.command(name='play', aliases=['p'])
 async def play(ctx, *, query: str = None):
-    """Play a song from YouTube or add it to the queue."""
+    """
+    Play a song from YouTube or add it to the queue.
+    Usage: !play <song name or URL>
+    Example: !play https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    """
     if not query:
         await ctx.send("Please provide a song name or URL.")
         return
@@ -595,7 +624,10 @@ async def play(ctx, *, query: str = None):
 
 @bot.command(name='skip')
 async def skip(ctx):
-    """Skip the current song."""
+    """
+    Skip the current song.
+    Usage: !skip
+    """
     if ctx.voice_client and ctx.voice_client.is_playing():
         ctx.voice_client.stop()
         await ctx.send("Skipped the current song.")
@@ -605,7 +637,10 @@ async def skip(ctx):
 
 @bot.command(name='queue', aliases=['q'])
 async def show_queue(ctx):
-    """Show the current music queue."""
+    """
+    Show the current music queue.
+    Usage: !queue
+    """
     queue = get_queue(ctx.guild.id)
     if not queue:
         await ctx.send("The queue is empty.")
@@ -619,7 +654,10 @@ async def show_queue(ctx):
 
 @bot.command(name='stop')
 async def stop(ctx):
-    """Stop the music and clear the queue."""
+    """
+    Stop the music and clear the queue.
+    Usage: !stop
+    """
     if ctx.voice_client:
         ctx.voice_client.stop()
         queues[ctx.guild.id] = []  # Clear the queue
@@ -627,7 +665,10 @@ async def stop(ctx):
 
 @bot.command(name='join')
 async def join(ctx):
-    """Join the voice channel."""
+    """
+    Join the voice channel.
+    Usage: !join
+    """
     if not ctx.author.voice:
         await ctx.send("You are not connected to a voice channel.")
         return
@@ -635,11 +676,13 @@ async def join(ctx):
 
 @bot.command(name='leave')
 async def leave(ctx):
-    """Leave the voice channel."""
+    """
+    Leave the voice channel.
+    Usage: !leave
+    """
     if ctx.voice_client:
         queues[ctx.guild.id] = []  # Clear the queue
         await ctx.voice_client.disconnect()
         await ctx.send("Disconnected from the voice channel.")
 
-    
 bot.run(token) 
