@@ -7,7 +7,7 @@ import re
 import json
 import datetime
 from typing import List, Dict, Any, Optional, Union
-
+import wavelink
 
 load_dotenv()
 # Bot configuration
@@ -162,14 +162,26 @@ token = os.getenv("TOKEN")
 async def on_ready():
     print(f"Helping Anna at your service!!! and logged in as {bot.user}")
     load_data()
+   
+    # Start background tasks
+    check_reminders.start()
+    check_polls.start()
+    # Connect to Wavelink node for music
+    try:
+        node = wavelink.Node(uri=os.getenv('LAVALINK_URI', 'http://localhost:2333'), 
+                            password=os.getenv('LAVALINK_PASSWORD', 'youshallnotpass'))
+        await wavelink.Pool.connect(client=bot, nodes=[node])
+        print("Connected to Lavalink node!")
+    except Exception as e:
+        print(f"Failed to connect to Lavalink: {e}")
+        print("Music features may not work. Make sure Lavalink is running.")
+    
+    # Sync commands
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
-    # Start background tasks
-    check_reminders.start()
-    check_polls.start()
 
 @bot.event
 async def on_member_join(member):
