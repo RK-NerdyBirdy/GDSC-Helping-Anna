@@ -22,9 +22,11 @@ ggclient = genai.Client(api_key=os.getenv("GEMNI"))
 
 Reminders_file = "reminders.json"
 Polls_file = "polls.json"
-polls ={}
 
+Settings_file = 'settings.json'
 reminders =[]
+polls ={}
+settings = {"servers": {}}
 def parse_time(time_str: str) -> Optional[datetime.datetime]:
     """Parse time string into datetime object."""
     now = datetime.datetime.now()
@@ -52,7 +54,10 @@ def parse_time(time_str: str) -> Optional[datetime.datetime]:
     
     return None
 
-
+def save_settings():
+    """Save settings to file."""
+    with open(Settings_file, 'w') as f:
+        json.dump(settings, f, indent=2)
 def save_reminders():
     """Save reminders to file."""
     with open(Reminders_file, 'w') as f:
@@ -75,6 +80,12 @@ def load_data():
     else:
         polls = {}
         save_polls()
+    if os.path.exists(Settings_file):
+        with open(Settings_file, 'r') as f:
+            settings = json.load(f)
+    else:
+        settings = {"servers": {}}
+        save_settings()
 
 # Tasks
 @tasks.loop(seconds=60)
@@ -159,7 +170,24 @@ async def on_ready():
     # Start background tasks
     check_reminders.start()
     check_polls.start()
+
+@bot.event
+async def on_member_join(member):
+    """Called when a member joins the server."""
+    guild_id = str(member.guild.id)
     
+    if guild_id in settings['servers'] and 'welcome_channel' in settings['servers'][guild_id]:
+        channel_id = settings['servers'][guild_id]['welcome_channel']
+        welcome_message = settings['servers'][guild_id].get('welcome_message', 'Welcome to the server, {user}!')
+        
+        # Replace placeholders
+        welcome_message = welcome_message.replace('{user}', member.mention)
+        welcome_message = welcome_message.replace('{username}', member.name)
+        welcome_message = welcome_message.replace('{server}', member.guild.name)
+        
+        channel = member.guild.get_channel(channel_id)
+        if channel:
+            await channel.send(f"{member.mention}"+welcome_message)  
 
 @bot.event
 async def on_message(message):
@@ -461,5 +489,21 @@ async def create_poll(ctx, *, args=None):
     except Exception as e:
         print(f"Error creating poll: {e}")
         await ctx.reply('Error creating poll. Please use the format: `!poll "Question?" "Option 1" "Option 2" [more options] [duration]`')
+
+@bot.command(name='setwelcome')
+@commands.has_permissions(administrator=True)
+async def set_welcome(ctx, *, message):
+    """Set a custom welcome message for new members."""
+    guild_id = str(ctx.guild.id)
+    
+    if guild_id not in settings['servers']:
+        settings['servers'][guild_id] = {}
+    
+    settings['servers'][guild_id]['welcome_channel'] = ctx.channel.id
+    settings['servers'][guild_id]['welcome_message'] = message
+    
+    save_settings()
+    
+    await ctx.reply(f"Welcome message set to: \"{message}\"")
 
 bot.run(token) 
